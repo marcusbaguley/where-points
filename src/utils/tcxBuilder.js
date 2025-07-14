@@ -20,7 +20,6 @@ function encode(str) {
 }
 
 export function buildTCX(track, coursePoints, courseName = "where-points route", startTimeISO = null) {
-  // times and distances are now properties on track
   return `<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -37,20 +36,20 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
             <LongitudeDegrees>${pt.lon}</LongitudeDegrees>
           </Position>
           ${pt.ele !== undefined && !isNaN(pt.ele) ? `<AltitudeMeters>${Number(pt.ele).toFixed(1)}</AltitudeMeters>` : ""}
-          <DistanceMeters>${pt.distance.toFixed(1)}</DistanceMeters>
+          <DistanceMeters>${pt.distance !== undefined && !isNaN(pt.distance) ? Number(pt.distance).toFixed(1) : "0.0"}</DistanceMeters>
         </Trackpoint>`).join("\n")}
       </Track>
       <CoursePoints>
         ${coursePoints.map(cp => {
-          // Find trackpoint index matching cue
+          // Find trackpoint index matching cue (by snapIdx or by distance)
           const idx = typeof cp.snapIdx === "number"
             ? cp.snapIdx
             : track.findIndex(
-                pt =>
-                  Math.abs(pt.lat - cp.lat) < 1e-8 &&
-                  Math.abs(pt.lon - cp.lon) < 1e-8
+                pt => Math.abs(pt.distance - cp.distance) < 1e-2
               );
-          const time = track[Math.floor(idx)]?.time || track[0].time;
+          const trkPt = track[Math.floor(idx)] || track[0];
+          const time = trkPt.time;
+          const distance = trkPt.distance !== undefined && !isNaN(trkPt.distance) ? Number(trkPt.distance).toFixed(1) : "0.0";
           return `<CoursePoint>
           <Name>${encode(cp.name)}</Name>
           <Time>${time}</Time>
@@ -60,6 +59,7 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
           </Position>
           <PointType>${tcxCueTypeMap[cp.type] || "Generic"}</PointType>
           <Notes>${encode(cp.notes || cp.name)}</Notes>
+          <DistanceMeters>${distance}</DistanceMeters>
         </CoursePoint>`;
         }).join("\n")}
       </CoursePoints>

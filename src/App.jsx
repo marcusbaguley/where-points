@@ -13,11 +13,9 @@ export default function App() {
   const [tcx, setTcx] = useState("");
   const [error, setError] = useState("");
 
-  // Insert a new trackpoint in the right place by distance
   function insertTrackpoint(track, newPt) {
     let idx = track.findIndex(pt => pt.distance > newPt.distance);
     if (idx === -1) idx = track.length;
-    // Only insert if not already present (within 1e-6 meters and lat/lon)
     if (!track.some(pt =>
       Math.abs(pt.lat - newPt.lat) < 1e-9 &&
       Math.abs(pt.lon - newPt.lon) < 1e-9
@@ -27,7 +25,6 @@ export default function App() {
     return idx;
   }
 
-  // Parse and process
   const handleProcess = async () => {
     setError("");
     if (!baseGpx) {
@@ -35,18 +32,15 @@ export default function App() {
       return;
     }
     try {
-      // Parse GPX files
       const base = parseGPX(await baseGpx.text());
       const poi = poiGpx ? parseGPX(await poiGpx.text()) : { waypoints: [] };
 
-      // Merge waypoints: base waypoints, base cues (routepoints), POI waypoints
       const allWaypoints = [
         ...(base.waypoints || []),
         ...(base.rtepts || []),
         ...(poi.waypoints || [])
       ];
 
-      // Clone track for insertion
       const updatedTrack = [...base.trkpts];
 
       // Snap waypoints and cues to interpolated trackpoint (insert if necessary!)
@@ -55,7 +49,7 @@ export default function App() {
         const idx = insertTrackpoint(updatedTrack, {
           lat: interpPt.lat,
           lon: interpPt.lon,
-          ele: interpPt.ele,
+          ele: typeof interpPt.ele === "number" ? interpPt.ele : parseFloat(interpPt.ele),
           distance: interpPt.distance
         });
         return {
@@ -63,20 +57,19 @@ export default function App() {
           name: pt.name,
           type: pt.type,
           notes: pt.name,
-          snapIdx: idx
+          snapIdx: idx,
+          distance: interpPt.distance
         };
       });
 
       // Parse CSV and create cues
       const cues = parseCSV(csvText).map(row => {
-        // Find by closest trackpoint index using distance in KM
         const cue = {
           name: row.name,
           lat: null,
           lon: null,
           distance: row.distance * 1000 // CSV is in km
         };
-        // Interpolate based on cumulative distance
         let foundIdx = null;
         for (let i = 1; i < updatedTrack.length; i++) {
           if (updatedTrack[i].distance >= cue.distance) {
@@ -89,32 +82,37 @@ export default function App() {
           const t = (cue.distance - ptA.distance) / (ptB.distance - ptA.distance);
           cue.lat = ptA.lat + (ptB.lat - ptA.lat) * t;
           cue.lon = ptA.lon + (ptB.lon - ptA.lon) * t;
-          cue.ele = parseFloat(ptA.ele) + (parseFloat(ptB.ele) - parseFloat(ptA.ele)) * t;
+          cue.ele =
+            parseFloat(ptA.ele) +
+            (parseFloat(ptB.ele) - parseFloat(ptA.ele)) * t;
         } else {
           cue.lat = updatedTrack[updatedTrack.length - 1].lat;
           cue.lon = updatedTrack[updatedTrack.length - 1].lon;
-          cue.ele = updatedTrack[updatedTrack.length - 1].ele;
+          cue.ele = parseFloat(updatedTrack[updatedTrack.length - 1].ele);
         }
-        const idx = insertTrackpoint(updatedTrack, cue);
+        const idx = insertTrackpoint(updatedTrack, {
+          lat: cue.lat,
+          lon: cue.lon,
+          ele: cue.ele,
+          distance: cue.distance
+        });
         return {
           ...cue,
           type: guessCueType(row.name),
           notes: `${row.name} (${row.distance} km)`,
-          snapIdx: idx
+          snapIdx: idx,
+          distance: cue.distance
         };
       });
 
       const allCues = [...snapped, ...cues];
 
-      // Progressive time assignment!
+      // Assign progressive time to all trackpoints
       const avgSpeed = 4.16; // meters/sec
       const startTime = new Date("2025-07-14T08:30:51Z");
       updatedTrack.forEach(pt => {
         pt.time = new Date(startTime.getTime() + (pt.distance / avgSpeed) * 1000).toISOString();
       });
-
-      // Ensure each cue's snapIdx matches the inserted trackpoint and its time
-      // This is handled in buildTCX now
 
       setTcx(buildTCX(updatedTrack, allCues));
     } catch (err) {
@@ -123,7 +121,6 @@ export default function App() {
     }
   };
 
-  // For CSV cues: guess type by name
   function guessCueType(name) {
     if (/right/i.test(name)) return "Right";
     if (/left/i.test(name)) return "Left";
