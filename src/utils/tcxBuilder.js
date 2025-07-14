@@ -20,14 +20,7 @@ function encode(str) {
 }
 
 export function buildTCX(track, coursePoints, courseName = "where-points route", startTimeISO = null) {
-  // Use track data as is (with interpolated and original points)
-  const times = track.map(pt => pt.time || startTimeISO || new Date().toISOString());
-  const distances = track.map(pt => pt.distance || 0);
-
-  console.log(
-    `[TCX] Building TCX: ${track.length} track points, ${coursePoints.length} course points, course name="${courseName}"`
-  );
-
+  // times and distances are now properties on track
   return `<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -37,28 +30,30 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
     <Course>
       <Name>${encode(courseName)}</Name>
       <Track>
-        ${track
-          .map(
-            (pt, i) => `<Trackpoint>
-          <Time>${times[i]}</Time>
+        ${track.map(pt => `<Trackpoint>
+          <Time>${pt.time}</Time>
           <Position>
             <LatitudeDegrees>${pt.lat}</LatitudeDegrees>
             <LongitudeDegrees>${pt.lon}</LongitudeDegrees>
           </Position>
-          ${pt.ele ? `<AltitudeMeters>${pt.ele}</AltitudeMeters>` : ""}
-          <DistanceMeters>${distances[i].toFixed(1)}</DistanceMeters>
-        </Trackpoint>`
-          )
-          .join("\n")}
+          ${pt.ele !== undefined && !isNaN(pt.ele) ? `<AltitudeMeters>${Number(pt.ele).toFixed(1)}</AltitudeMeters>` : ""}
+          <DistanceMeters>${pt.distance.toFixed(1)}</DistanceMeters>
+        </Trackpoint>`).join("\n")}
       </Track>
       <CoursePoints>
-        ${coursePoints
-          .map(cp => {
-            // Use snapIdx as index in track, or fallback to 0
-            const idx = typeof cp.snapIdx === "number" ? cp.snapIdx : 0;
-            return `<CoursePoint>
+        ${coursePoints.map(cp => {
+          // Find trackpoint index matching cue
+          const idx = typeof cp.snapIdx === "number"
+            ? cp.snapIdx
+            : track.findIndex(
+                pt =>
+                  Math.abs(pt.lat - cp.lat) < 1e-8 &&
+                  Math.abs(pt.lon - cp.lon) < 1e-8
+              );
+          const time = track[Math.floor(idx)]?.time || track[0].time;
+          return `<CoursePoint>
           <Name>${encode(cp.name)}</Name>
-          <Time>${times[Math.floor(idx)] || times[0]}</Time>
+          <Time>${time}</Time>
           <Position>
             <LatitudeDegrees>${cp.lat}</LatitudeDegrees>
             <LongitudeDegrees>${cp.lon}</LongitudeDegrees>
@@ -66,8 +61,7 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
           <PointType>${tcxCueTypeMap[cp.type] || "Generic"}</PointType>
           <Notes>${encode(cp.notes || cp.name)}</Notes>
         </CoursePoint>`;
-          })
-          .join("\n")}
+        }).join("\n")}
       </CoursePoints>
     </Course>
   </Courses>

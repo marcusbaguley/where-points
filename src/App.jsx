@@ -46,18 +46,17 @@ export default function App() {
         ...(poi.waypoints || [])
       ];
 
-      console.log(`[App] Merging: ${allWaypoints.length} waypoints/cues, ${base.trkpts.length} track points`);
+      // Clone track for insertion
+      const updatedTrack = [...base.trkpts];
 
       // Snap waypoints and cues to interpolated trackpoint (insert if necessary!)
-      const updatedTrack = [...base.trkpts];
       const snapped = allWaypoints.map(pt => {
         const interpPt = interpolateTrackpoint(updatedTrack, pt);
         const idx = insertTrackpoint(updatedTrack, {
           lat: interpPt.lat,
           lon: interpPt.lon,
           ele: interpPt.ele,
-          distance: interpPt.distance,
-          time: interpPt.time // Could be undefined if not present
+          distance: interpPt.distance
         });
         return {
           ...interpPt,
@@ -90,15 +89,11 @@ export default function App() {
           const t = (cue.distance - ptA.distance) / (ptB.distance - ptA.distance);
           cue.lat = ptA.lat + (ptB.lat - ptA.lat) * t;
           cue.lon = ptA.lon + (ptB.lon - ptA.lon) * t;
-          cue.ele = ptA.ele + (ptB.ele - ptA.ele) * t;
-          cue.time = ptA.time && ptB.time
-            ? new Date(new Date(ptA.time).getTime() + (new Date(ptB.time).getTime() - new Date(ptA.time).getTime()) * t).toISOString()
-            : undefined;
+          cue.ele = parseFloat(ptA.ele) + (parseFloat(ptB.ele) - parseFloat(ptA.ele)) * t;
         } else {
           cue.lat = updatedTrack[updatedTrack.length - 1].lat;
           cue.lon = updatedTrack[updatedTrack.length - 1].lon;
           cue.ele = updatedTrack[updatedTrack.length - 1].ele;
-          cue.time = updatedTrack[updatedTrack.length - 1].time;
         }
         const idx = insertTrackpoint(updatedTrack, cue);
         return {
@@ -109,13 +104,19 @@ export default function App() {
         };
       });
 
-      console.log(`[App] Snapped ${snapped.length} waypoints/cues, ${cues.length} CSV cues`);
-
       const allCues = [...snapped, ...cues];
 
-      // Build TCX
+      // Progressive time assignment!
+      const avgSpeed = 4.16; // meters/sec
+      const startTime = new Date("2025-07-14T08:30:51Z");
+      updatedTrack.forEach(pt => {
+        pt.time = new Date(startTime.getTime() + (pt.distance / avgSpeed) * 1000).toISOString();
+      });
+
+      // Ensure each cue's snapIdx matches the inserted trackpoint and its time
+      // This is handled in buildTCX now
+
       setTcx(buildTCX(updatedTrack, allCues));
-      console.log("[App] TCX generation complete");
     } catch (err) {
       setError("Failed to process: " + err.message);
       console.error("[App] Error in processing:", err);
@@ -131,21 +132,6 @@ export default function App() {
     return "Generic";
   }
 
-  // Approximate total track length in KM for cue snapping
-  function trackLengthKm(track) {
-    let sum = 0;
-    for (let i = 1; i < track.length; i++) {
-      sum +=
-        window.haversine(
-          track[i - 1].lat,
-          track[i - 1].lon,
-          track[i].lat,
-          track[i].lon
-        ) / 1000;
-    }
-    return sum;
-  }
-  // Haversine function for length calc (browser global)
   window.haversine =
     window.haversine ||
     function (lat1, lon1, lat2, lon2) {
