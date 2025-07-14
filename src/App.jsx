@@ -6,17 +6,17 @@ import { buildTCX } from "./utils/tcxBuilder";
 import Button from "./components/Button";
 import Card from "./components/Card";
 
-// --- Helper function to build GPX with waypoints ---
-function buildGPXWaypointsFromCSV(csvCues) {
+// --- Helper function to build GPX with waypoints, now uses baseName ---
+function buildGPXWaypointsFromCSV(csvCues, baseName) {
   const sortedCues = [...csvCues].sort((a, b) => a.distance - b.distance);
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx creator="where-points" version="1.1"
+<gpx creator="${baseName}" version="1.1"
   xmlns="http://www.topografix.com/GPX/1/1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://www.topografix.com/GPX/1/1
     http://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
-    <name>CSV Cues as GPX Waypoints</name>
+    <name>${baseName} CSV Cues as GPX Waypoints</name>
     <desc>All CSV cues snapped to the route as GPX waypoints</desc>
   </metadata>
   ${sortedCues
@@ -39,9 +39,20 @@ export default function App() {
   const [tcx, setTcx] = useState("");
   const [csvCuesWithCoords, setCsvCuesWithCoords] = useState([]);
   const [error, setError] = useState("");
-  // New state for split feature:
   const [splitMarkers, setSplitMarkers] = useState(""); // e.g. "100,255,500"
   const [splitFiles, setSplitFiles] = useState([]); // array of {name,tcx}
+  const [baseName, setBaseName] = useState(""); // Track Base Name
+
+  // Update GPX handler to set baseName from filename
+  function handleBaseGpxUpload(e) {
+    const file = e.target.files[0];
+    setBaseGpx(file);
+    if (file) {
+      // Get filename without extension
+      const name = file.name.replace(/\.[^/.]+$/, "");
+      setBaseName(name);
+    }
+  }
 
   function insertTrackpoint(track, newPt) {
     let idx = track.findIndex(pt => pt.distance > newPt.distance);
@@ -150,7 +161,7 @@ export default function App() {
         ).toISOString();
       });
 
-      setTcx(buildTCX(updatedTrack, allCues));
+      setTcx(buildTCX(updatedTrack, allCues, baseName));
       setCsvCuesWithCoords(cues);
       setSplitFiles([]); // clear splits on new process
     } catch (err) {
@@ -219,10 +230,10 @@ export default function App() {
         ...cp,
         distance: cp.distance - baseDistance
       }));
-      // build TCX for this section
-      const tcxSection = buildTCX(sectionTrack, sectionCourse, `Split Part ${i + 1}`);
+      // build TCX for this section, use baseName for both file and course name
+      const tcxSection = buildTCX(sectionTrack, sectionCourse, `${baseName} Part ${i + 1}`);
       sections.push({
-        name: `where-points-part-${i + 1}.tcx`,
+        name: `${baseName}-part-${i + 1}.tcx`,
         tcx: tcxSection
       });
       start = end;
@@ -258,11 +269,33 @@ export default function App() {
     <div className="min-h-screen bg-gray-100 flex flex-col items-center py-8">
       <div className="w-full max-w-2xl">
         <h1 className="text-3xl font-bold mb-8 text-center">where-points</h1>
+        <Card title="Info">
+          <p>
+            Upload your base GPX (with track and cues), optional waypoints GPX,
+            and paste any resupply, cues as description, kilometer marker. All cues and waypoints will be snapped to the
+            track and exported as a Garmin-compatible TCX.
+          </p>
+          <p>
+            You can also download the CSV cues (with matched coordinates) as GPX waypoints.
+          </p>
+          <p>
+            <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
+          </p>
+        </Card>
+        <Card title="Track Base Name">
+          <input
+            type="text"
+            value={baseName}
+            onChange={e => setBaseName(e.target.value)}
+            className="border rounded px-2 py-1 w-full"
+            placeholder="Route name"
+          />
+        </Card>
         <Card title="1. Upload Base GPX">
           <input
             type="file"
             accept=".gpx"
-            onChange={e => setBaseGpx(e.target.files[0])}
+            onChange={handleBaseGpxUpload}
           />
         </Card>
         <Card title="2. Optional: Upload POI GPX">
@@ -291,17 +324,18 @@ export default function App() {
           <Card title="Download">
             <a
               href={`data:application/xml,${encodeURIComponent(tcx)}`}
-              download="where-points.tcx"
+              download={`${baseName || "where-points"}.tcx`}
+              className="mb-4 mr-4 inline-block"
             >
               <Button>Download TCX</Button>
             </a>
             {csvCuesWithCoords.length > 0 && (
               <a
                 href={`data:application/gpx+xml,${encodeURIComponent(
-                  buildGPXWaypointsFromCSV(csvCuesWithCoords)
+                  buildGPXWaypointsFromCSV(csvCuesWithCoords, baseName)
                 )}`}
-                download="csv-cues-waypoints.gpx"
-                style={{ marginLeft: 16 }}
+                download={`${baseName || "where-points"}-csv-cues-waypoints.gpx`}
+                className="mb-4 mr-4 inline-block"
               >
                 <Button>Download CSV points into GPX</Button>
               </a>
@@ -322,14 +356,14 @@ export default function App() {
               </Button>
             </div>
             {splitFiles.length > 0 && (
-              <div className="mt-4">
-                <div className="font-semibold mb-2">Split TCX Downloads:</div>
+              <div className="mt-4 flex flex-wrap gap-4">
+                <div className="font-semibold w-full mb-2">Split TCX Downloads:</div>
                 {splitFiles.map((file, i) => (
                   <a
                     key={file.name}
                     href={`data:application/xml,${encodeURIComponent(file.tcx)}`}
                     download={file.name}
-                    style={{ marginRight: 16 }}
+                    className="inline-block"
                   >
                     <Button>Download {file.name}</Button>
                   </a>
@@ -338,19 +372,6 @@ export default function App() {
             )}
           </Card>
         )}
-        <Card title="Info">
-          <p>
-            Upload your base GPX (with track and cues), optional waypoints GPX,
-            and paste your CSV cues. All cues and waypoints will be snapped to the
-            track and exported as a Garmin-compatible TCX.
-          </p>
-          <p>
-            You can also download the CSV cues (with matched coordinates) as GPX waypoints.
-          </p>
-          <p>
-            <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
-          </p>
-        </Card>
       </div>
     </div>
   );
