@@ -114,6 +114,7 @@ export default function App() {
         pt.time = new Date(startTime.getTime() + (pt.distance / avgSpeed) * 1000).toISOString();
       });
 
+      allCues.sort((a, b) => a.distance - b.distance);
       setTcx(buildTCX(updatedTrack, allCues));
     } catch (err) {
       setError("Failed to process: " + err.message);
