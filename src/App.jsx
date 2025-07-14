@@ -6,20 +6,49 @@ import { buildTCX } from "./utils/tcxBuilder";
 import Button from "./components/Button";
 import Card from "./components/Card";
 
+// --- Helper function to build GPX with waypoints ---
+function buildGPXWaypointsFromCSV(csvCues) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="where-points" version="1.1"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1
+    http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>CSV Cues as GPX Waypoints</name>
+    <desc>All CSV cues snapped to the route as GPX waypoints</desc>
+  </metadata>
+  ${csvCues
+    .map(
+      (cue, i) => `<wpt lat="${cue.lat}" lon="${cue.lon}">
+    <name>${cue.name}</name>
+    <desc>${cue.notes || cue.name}</desc>
+    ${cue.ele !== undefined && !isNaN(cue.ele) ? `<ele>${Number(cue.ele).toFixed(1)}</ele>` : ""}
+    <type>waypoint</type>
+  </wpt>`
+    )
+    .join("\n  ")}
+</gpx>`;
+}
+
 export default function App() {
   const [baseGpx, setBaseGpx] = useState(null);
   const [poiGpx, setPoiGpx] = useState(null);
   const [csvText, setCsvText] = useState("");
   const [tcx, setTcx] = useState("");
+  const [csvCuesWithCoords, setCsvCuesWithCoords] = useState([]);
   const [error, setError] = useState("");
 
   function insertTrackpoint(track, newPt) {
     let idx = track.findIndex(pt => pt.distance > newPt.distance);
     if (idx === -1) idx = track.length;
-    if (!track.some(pt =>
-      Math.abs(pt.lat - newPt.lat) < 1e-9 &&
-      Math.abs(pt.lon - newPt.lon) < 1e-9
-    )) {
+    if (
+      !track.some(
+        pt =>
+          Math.abs(pt.lat - newPt.lat) < 1e-9 &&
+          Math.abs(pt.lon - newPt.lon) < 1e-9
+      )
+    ) {
       track.splice(idx, 0, newPt);
     }
     return idx;
@@ -62,7 +91,7 @@ export default function App() {
         };
       });
 
-      // Parse CSV and create cues
+      // Parse CSV and create cues with lat/lon
       const cues = parseCSV(csvText).map(row => {
         const cue = {
           name: row.name,
@@ -78,7 +107,8 @@ export default function App() {
           }
         }
         if (foundIdx !== null) {
-          const ptA = updatedTrack[foundIdx], ptB = updatedTrack[foundIdx + 1];
+          const ptA = updatedTrack[foundIdx],
+            ptB = updatedTrack[foundIdx + 1];
           const t = (cue.distance - ptA.distance) / (ptB.distance - ptA.distance);
           cue.lat = ptA.lat + (ptB.lat - ptA.lat) * t;
           cue.lon = ptA.lon + (ptB.lon - ptA.lon) * t;
@@ -99,7 +129,7 @@ export default function App() {
         return {
           ...cue,
           type: guessCueType(row.name),
-          notes: `${row.name} (${row.distance} km)`,
+          notes: `${row.name}`,
           snapIdx: idx,
           distance: cue.distance
         };
@@ -111,11 +141,17 @@ export default function App() {
       const avgSpeed = 4.16; // meters/sec
       const startTime = new Date("2025-07-14T08:30:51Z");
       updatedTrack.forEach(pt => {
-        pt.time = new Date(startTime.getTime() + (pt.distance / avgSpeed) * 1000).toISOString();
+        pt.time = new Date(
+          startTime.getTime() + (pt.distance / avgSpeed) * 1000
+        ).toISOString();
       });
 
+      // Sort cues by distance for TCX output
       allCues.sort((a, b) => a.distance - b.distance);
+
       setTcx(buildTCX(updatedTrack, allCues));
+      // Save only CSV cues with their matched coordinates for GPX download
+      setCsvCuesWithCoords(cues);
     } catch (err) {
       setError("Failed to process: " + err.message);
       console.error("[App] Error in processing:", err);
@@ -186,6 +222,17 @@ export default function App() {
             >
               <Button>Download TCX</Button>
             </a>
+            {csvCuesWithCoords.length > 0 && (
+              <a
+                href={`data:application/gpx+xml,${encodeURIComponent(
+                  buildGPXWaypointsFromCSV(csvCuesWithCoords)
+                )}`}
+                download="csv-cues-waypoints.gpx"
+                style={{ marginLeft: 16 }}
+              >
+                <Button>Download CSV points into GPX</Button>
+              </a>
+            )}
           </Card>
         )}
         <Card title="Info">
@@ -193,6 +240,9 @@ export default function App() {
             Upload your base GPX (with track and cues), optional waypoints GPX,
             and paste your CSV cues. All cues and waypoints will be snapped to the
             track and exported as a Garmin-compatible TCX.
+          </p>
+          <p>
+            You can also download the CSV cues (with matched coordinates) as GPX waypoints.
           </p>
         </Card>
       </div>
