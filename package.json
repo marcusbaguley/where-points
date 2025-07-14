@@ -2,16 +2,22 @@
   "name": "where-points",
   "version": "1.0.0",
   "private": true,
+  "homepage": "https://marcusbaguley.github.io/where-points",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
   },
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "gh-pages": "^5.0.0",
     "vite": "^5.0.0",
     "tailwindcss": "^3.4.1",
     "postcss": "^8.4.24",
