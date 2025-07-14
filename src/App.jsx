@@ -8,6 +8,7 @@ import Card from "./components/Card";
 
 // --- Helper function to build GPX with waypoints ---
 function buildGPXWaypointsFromCSV(csvCues) {
+  const sortedCues = [...csvCues].sort((a, b) => a.distance - b.distance);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <gpx creator="where-points" version="1.1"
   xmlns="http://www.topografix.com/GPX/1/1"
@@ -18,7 +19,7 @@ function buildGPXWaypointsFromCSV(csvCues) {
     <name>CSV Cues as GPX Waypoints</name>
     <desc>All CSV cues snapped to the route as GPX waypoints</desc>
   </metadata>
-  ${csvCues
+  ${sortedCues
     .map(
       (cue, i) => `<wpt lat="${cue.lat}" lon="${cue.lon}">
     <name>${cue.name}</name>
@@ -38,6 +39,9 @@ export default function App() {
   const [tcx, setTcx] = useState("");
   const [csvCuesWithCoords, setCsvCuesWithCoords] = useState([]);
   const [error, setError] = useState("");
+  // New state for split feature:
+  const [splitMarkers, setSplitMarkers] = useState(""); // e.g. "100,255,500"
+  const [splitFiles, setSplitFiles] = useState([]); // array of {name,tcx}
 
   function insertTrackpoint(track, newPt) {
     let idx = track.findIndex(pt => pt.distance > newPt.distance);
@@ -56,6 +60,7 @@ export default function App() {
 
   const handleProcess = async () => {
     setError("");
+    setSplitFiles([]); // reset split files when re-processing
     if (!baseGpx) {
       setError("Base GPX is required.");
       return;
@@ -72,7 +77,6 @@ export default function App() {
 
       const updatedTrack = [...base.trkpts];
 
-      // Snap waypoints and cues to interpolated trackpoint (insert if necessary!)
       const snapped = allWaypoints.map(pt => {
         const interpPt = interpolateTrackpoint(updatedTrack, pt);
         const idx = insertTrackpoint(updatedTrack, {
@@ -91,13 +95,12 @@ export default function App() {
         };
       });
 
-      // Parse CSV and create cues with lat/lon
       const cues = parseCSV(csvText).map(row => {
         const cue = {
           name: row.name,
           lat: null,
           lon: null,
-          distance: row.distance * 1000 // CSV is in km
+          distance: row.distance * 1000
         };
         let foundIdx = null;
         for (let i = 1; i < updatedTrack.length; i++) {
@@ -135,9 +138,10 @@ export default function App() {
         };
       });
 
-      const allCues = [...snapped, ...cues];
+      // Sort cues by distance
+      const allCues = [...snapped, ...cues].sort((a, b) => a.distance - b.distance);
+      cues.sort((a, b) => a.distance - b.distance);
 
-      // Assign progressive time to all trackpoints
       const avgSpeed = 4.16; // meters/sec
       const startTime = new Date("2025-07-14T08:30:51Z");
       updatedTrack.forEach(pt => {
@@ -146,17 +150,86 @@ export default function App() {
         ).toISOString();
       });
 
-      // Sort cues by distance for TCX output
-      allCues.sort((a, b) => a.distance - b.distance);
-
       setTcx(buildTCX(updatedTrack, allCues));
-      // Save only CSV cues with their matched coordinates for GPX download
       setCsvCuesWithCoords(cues);
+      setSplitFiles([]); // clear splits on new process
     } catch (err) {
       setError("Failed to process: " + err.message);
       console.error("[App] Error in processing:", err);
     }
   };
+
+  // --- Split TCX feature ---
+  function handleSplitTCX() {
+    if (!tcx) return;
+    const splitPoints = splitMarkers
+      .split(",")
+      .map(s => parseFloat(s.trim()))
+      .filter(s => !isNaN(s) && s > 0)
+      .map(km => km * 1000);
+    if (!splitPoints.length) {
+      setError("Please enter valid split markers in KM (comma separated).");
+      return;
+    }
+
+    // parse the last generated route (as in handleProcess)
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(tcx, "application/xml");
+    const trackpoints = Array.from(doc.getElementsByTagNameNS("*", "Trackpoint")).map(tp => ({
+      lat: parseFloat(tp.getElementsByTagNameNS("*", "LatitudeDegrees")[0].textContent),
+      lon: parseFloat(tp.getElementsByTagNameNS("*", "LongitudeDegrees")[0].textContent),
+      ele: tp.getElementsByTagNameNS("*", "AltitudeMeters").length
+        ? parseFloat(tp.getElementsByTagNameNS("*", "AltitudeMeters")[0].textContent)
+        : undefined,
+      distance: parseFloat(tp.getElementsByTagNameNS("*", "DistanceMeters")[0].textContent),
+      time: tp.getElementsByTagNameNS("*", "Time")[0].textContent
+    }));
+    const coursepoints = Array.from(doc.getElementsByTagNameNS("*", "CoursePoint")).map(cp => ({
+      name: cp.getElementsByTagNameNS("*", "Name")[0].textContent,
+      lat: parseFloat(cp.getElementsByTagNameNS("*", "LatitudeDegrees")[0].textContent),
+      lon: parseFloat(cp.getElementsByTagNameNS("*", "LongitudeDegrees")[0].textContent),
+      ele: undefined, // optional, not in CoursePoint
+      distance: cp.getElementsByTagNameNS("*", "DistanceMeters").length
+        ? parseFloat(cp.getElementsByTagNameNS("*", "DistanceMeters")[0].textContent)
+        : undefined,
+      time: cp.getElementsByTagNameNS("*", "Time")[0].textContent,
+      type: cp.getElementsByTagNameNS("*", "PointType")[0].textContent,
+      notes: cp.getElementsByTagNameNS("*", "Notes")[0].textContent
+    }));
+    // always add the last distance as final split
+    const allSplitPoints = [...splitPoints, trackpoints[trackpoints.length - 1].distance];
+    const sections = [];
+    let start = 0;
+    allSplitPoints.forEach((end, i) => {
+      // get trackpoints for this section (inclusive of first, up to end)
+      const sectionTrack = trackpoints.filter(pt => pt.distance >= start && pt.distance <= end);
+      if (sectionTrack.length < 2) {
+        start = end;
+        return; // skip empty sections
+      }
+      // adjust distances so first is 0
+      const baseDistance = sectionTrack[0].distance;
+      sectionTrack.forEach(pt => {
+        pt.distance -= baseDistance;
+      });
+      // get coursepoints in this section (with distance in section range)
+      const sectionCourse = coursepoints.filter(
+        cp => cp.distance >= start && cp.distance <= end
+      ).map(cp => ({
+        ...cp,
+        distance: cp.distance - baseDistance
+      }));
+      // build TCX for this section
+      const tcxSection = buildTCX(sectionTrack, sectionCourse, `Split Part ${i + 1}`);
+      sections.push({
+        name: `where-points-part-${i + 1}.tcx`,
+        tcx: tcxSection
+      });
+      start = end;
+    });
+    setSplitFiles(sections);
+    setError(""); // clear any error
+  }
 
   function guessCueType(name) {
     if (/right/i.test(name)) return "Right";
@@ -233,6 +306,36 @@ export default function App() {
                 <Button>Download CSV points into GPX</Button>
               </a>
             )}
+            <div className="mt-4">
+              <label className="block mb-1 font-medium">
+                Split file up at KM markers (comma separated):
+              </label>
+              <input
+                className="border rounded px-2 py-1 w-72"
+                type="text"
+                value={splitMarkers}
+                onChange={e => setSplitMarkers(e.target.value)}
+                placeholder="e.g. 100,255,500"
+              />
+              <Button style={{ marginLeft: 8 }} onClick={handleSplitTCX}>
+                Split & Download
+              </Button>
+            </div>
+            {splitFiles.length > 0 && (
+              <div className="mt-4">
+                <div className="font-semibold mb-2">Split TCX Downloads:</div>
+                {splitFiles.map((file, i) => (
+                  <a
+                    key={file.name}
+                    href={`data:application/xml,${encodeURIComponent(file.tcx)}`}
+                    download={file.name}
+                    style={{ marginRight: 16 }}
+                  >
+                    <Button>Download {file.name}</Button>
+                  </a>
+                ))}
+              </div>
+            )}
           </Card>
         )}
         <Card title="Info">
@@ -243,6 +346,9 @@ export default function App() {
           </p>
           <p>
             You can also download the CSV cues (with matched coordinates) as GPX waypoints.
+          </p>
+          <p>
+            <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
           </p>
         </Card>
       </div>
