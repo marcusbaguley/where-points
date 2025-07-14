@@ -32,6 +32,8 @@ export default function App() {
         ...(poi.waypoints || [])
       ];
 
+      console.log(`[App] Merging: ${allWaypoints.length} waypoints/cues, ${base.trkpts.length} track points`);
+
       // Snap waypoints and cues to nearest track point
       const snapped = allWaypoints.map(pt => {
         const snappedPt = snapToTrack(pt, base.trkpts);
@@ -51,12 +53,16 @@ export default function App() {
         };
       });
 
+      console.log(`[App] Snapped ${snapped.length} waypoints/cues, ${cues.length} CSV cues`);
+
       const allCues = [...snapped, ...cues];
 
       // Build TCX
       setTcx(buildTCX(base.trkpts, allCues));
+      console.log("[App] TCX generation complete");
     } catch (err) {
       setError("Failed to process: " + err.message);
+      console.error("[App] Error in processing:", err);
     }
   };
 

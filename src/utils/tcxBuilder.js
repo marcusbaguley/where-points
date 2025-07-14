@@ -42,6 +42,10 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
     times.push(time.toISOString());
   }
 
+  console.log(
+    `[TCX] Building TCX: ${track.length} track points, ${coursePoints.length} course points, course name="${courseName}"`
+  );
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -68,7 +72,6 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
       <CoursePoints>
         ${coursePoints
           .map(cp => {
-            // Use snapIdx (index of nearest trackpoint) if present, else 0
             const snapIdx =
               typeof cp.snapIdx === "number"
                 ? cp.snapIdx

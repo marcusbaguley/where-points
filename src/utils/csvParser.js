@@ -1,6 +1,6 @@
 // Simple CSV parser for 'Name,Distance'
 export function parseCSV(csv) {
-  return csv
+  const cues = csv
     .split("\n")
     .map(line => line.trim())
     .filter(Boolean)
@@ -12,4 +12,7 @@ export function parseCSV(csv) {
       };
     })
     .filter(row => row.name && !isNaN(row.distance));
+
+  console.log(`[CSV] Parsed: ${cues.length} cues from CSV input`);
+  return cues;
 }

@@ -22,5 +22,9 @@ export function snapToTrack(pt, track) {
       nearestIdx = idx;
     }
   });
+  // Log summary for each snap (can be verbose if many points)
+  console.log(
+    `[Snap] Snapped "${pt.name || pt.type || "unknown"}" to track index ${nearestIdx} (distance: ${minDist.toFixed(1)}m)`
+  );
   return { ...track[nearestIdx], snapIdx: nearestIdx };
 }
