@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { parseGPX } from "./utils/gpxParser";
 import { parseCSV } from "./utils/csvParser";
-import { snapToTrack } from "./utils/snapToTrack";
+import { interpolateTrackpoint } from "./utils/interpolateTrackpoint";
 import { buildTCX } from "./utils/tcxBuilder";
 import Button from "./components/Button";
 import Card from "./components/Card";
@@ -12,6 +12,20 @@ export default function App() {
   const [csvText, setCsvText] = useState("");
   const [tcx, setTcx] = useState("");
   const [error, setError] = useState("");
+
+  // Insert a new trackpoint in the right place by distance
+  function insertTrackpoint(track, newPt) {
+    let idx = track.findIndex(pt => pt.distance > newPt.distance);
+    if (idx === -1) idx = track.length;
+    // Only insert if not already present (within 1e-6 meters and lat/lon)
+    if (!track.some(pt =>
+      Math.abs(pt.lat - newPt.lat) < 1e-9 &&
+      Math.abs(pt.lon - newPt.lon) < 1e-9
+    )) {
+      track.splice(idx, 0, newPt);
+    }
+    return idx;
+  }
 
   // Parse and process
   const handleProcess = async () => {
@@ -34,22 +48,64 @@ export default function App() {
 
       console.log(`[App] Merging: ${allWaypoints.length} waypoints/cues, ${base.trkpts.length} track points`);
 
-      // Snap waypoints and cues to nearest track point
+      // Snap waypoints and cues to interpolated trackpoint (insert if necessary!)
+      const updatedTrack = [...base.trkpts];
       const snapped = allWaypoints.map(pt => {
-        const snappedPt = snapToTrack(pt, base.trkpts);
-        return { ...snappedPt, name: pt.name, type: pt.type, notes: pt.name };
+        const interpPt = interpolateTrackpoint(updatedTrack, pt);
+        const idx = insertTrackpoint(updatedTrack, {
+          lat: interpPt.lat,
+          lon: interpPt.lon,
+          ele: interpPt.ele,
+          distance: interpPt.distance,
+          time: interpPt.time // Could be undefined if not present
+        });
+        return {
+          ...interpPt,
+          name: pt.name,
+          type: pt.type,
+          notes: pt.name,
+          snapIdx: idx
+        };
       });
 
       // Parse CSV and create cues
       const cues = parseCSV(csvText).map(row => {
-        // Find by closest track point index using distance in KM
-        const idx = Math.round((row.distance / trackLengthKm(base.trkpts)) * (base.trkpts.length - 1));
-        const pt = base.trkpts[idx];
-        return {
-          ...pt,
+        // Find by closest trackpoint index using distance in KM
+        const cue = {
           name: row.name,
+          lat: null,
+          lon: null,
+          distance: row.distance * 1000 // CSV is in km
+        };
+        // Interpolate based on cumulative distance
+        let foundIdx = null;
+        for (let i = 1; i < updatedTrack.length; i++) {
+          if (updatedTrack[i].distance >= cue.distance) {
+            foundIdx = i - 1;
+            break;
+          }
+        }
+        if (foundIdx !== null) {
+          const ptA = updatedTrack[foundIdx], ptB = updatedTrack[foundIdx + 1];
+          const t = (cue.distance - ptA.distance) / (ptB.distance - ptA.distance);
+          cue.lat = ptA.lat + (ptB.lat - ptA.lat) * t;
+          cue.lon = ptA.lon + (ptB.lon - ptA.lon) * t;
+          cue.ele = ptA.ele + (ptB.ele - ptA.ele) * t;
+          cue.time = ptA.time && ptB.time
+            ? new Date(new Date(ptA.time).getTime() + (new Date(ptB.time).getTime() - new Date(ptA.time).getTime()) * t).toISOString()
+            : undefined;
+        } else {
+          cue.lat = updatedTrack[updatedTrack.length - 1].lat;
+          cue.lon = updatedTrack[updatedTrack.length - 1].lon;
+          cue.ele = updatedTrack[updatedTrack.length - 1].ele;
+          cue.time = updatedTrack[updatedTrack.length - 1].time;
+        }
+        const idx = insertTrackpoint(updatedTrack, cue);
+        return {
+          ...cue,
           type: guessCueType(row.name),
-          notes: `${row.name} (${row.distance} km)`
+          notes: `${row.name} (${row.distance} km)`,
+          snapIdx: idx
         };
       });
 
@@ -58,7 +114,7 @@ export default function App() {
       const allCues = [...snapped, ...cues];
 
       // Build TCX
-      setTcx(buildTCX(base.trkpts, allCues));
+      setTcx(buildTCX(updatedTrack, allCues));
       console.log("[App] TCX generation complete");
     } catch (err) {
       setError("Failed to process: " + err.message);

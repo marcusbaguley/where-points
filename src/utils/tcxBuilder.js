@@ -20,27 +20,9 @@ function encode(str) {
 }
 
 export function buildTCX(track, coursePoints, courseName = "where-points route", startTimeISO = null) {
-  // Compute cumulative distance for each track point
-  let distances = [0];
-  for (let i = 1; i < track.length; i++) {
-    const d = window.haversine(
-      track[i - 1].lat,
-      track[i - 1].lon,
-      track[i].lat,
-      track[i].lon
-    );
-    distances.push(distances[i - 1] + d);
-  }
-
-  // Generate times: startTime + X seconds, assuming e.g. 15km/h avg speed
-  const avgSpeed = 4.16; // m/s (~15km/h)
-  const baseTime = startTimeISO ? new Date(startTimeISO) : new Date();
-  let times = [baseTime.toISOString()];
-  for (let i = 1; i < distances.length; i++) {
-    const seconds = distances[i] / avgSpeed;
-    const time = new Date(baseTime.getTime() + seconds * 1000);
-    times.push(time.toISOString());
-  }
+  // Use track data as is (with interpolated and original points)
+  const times = track.map(pt => pt.time || startTimeISO || new Date().toISOString());
+  const distances = track.map(pt => pt.distance || 0);
 
   console.log(
     `[TCX] Building TCX: ${track.length} track points, ${coursePoints.length} course points, course name="${courseName}"`
@@ -72,13 +54,11 @@ export function buildTCX(track, coursePoints, courseName = "where-points route",
       <CoursePoints>
         ${coursePoints
           .map(cp => {
-            const snapIdx =
-              typeof cp.snapIdx === "number"
-                ? cp.snapIdx
-                : (cp.nearestTrackIdx || 0);
+            // Use snapIdx as index in track, or fallback to 0
+            const idx = typeof cp.snapIdx === "number" ? cp.snapIdx : 0;
             return `<CoursePoint>
           <Name>${encode(cp.name)}</Name>
-          <Time>${times[snapIdx] || times[0]}</Time>
+          <Time>${times[Math.floor(idx)] || times[0]}</Time>
           <Position>
             <LatitudeDegrees>${cp.lat}</LatitudeDegrees>
             <LongitudeDegrees>${cp.lon}</LongitudeDegrees>
