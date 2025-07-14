@@ -282,6 +282,13 @@ export default function App() {
             <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
           </p>
         </Card>
+        <Card title="1. Upload Base GPX">
+          <input
+            type="file"
+            accept=".gpx"
+            onChange={handleBaseGpxUpload}
+          />
+        </Card>
         <Card title="Track Base Name">
           <input
             type="text"
@@ -289,13 +296,6 @@ export default function App() {
             onChange={e => setBaseName(e.target.value)}
             className="border rounded px-2 py-1 w-full"
             placeholder="Route name"
-          />
-        </Card>
-        <Card title="1. Upload Base GPX">
-          <input
-            type="file"
-            accept=".gpx"
-            onChange={handleBaseGpxUpload}
           />
         </Card>
         <Card title="2. Optional: Upload POI GPX">
