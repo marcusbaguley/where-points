@@ -208,14 +208,18 @@ export default function App() {
           if (!snapped) {
             // eslint-disable-next-line no-console
             console.log(
-              `[Ignore CoursePoint] Not within 20m of original GPX:`,
+              `[Ignore CoursePoint] Not within 50m of original GPX:`,
               cp.name,
               cp.lat,
               cp.lon
             );
             return null;
           }
-          console.log(`Included: `, cp.name)
+          // Log successful snap
+          // eslint-disable-next-line no-console
+          console.log(
+            `[Snap CoursePoint] ${cp.name} snapped from (${cp.lat}, ${cp.lon}) to (${snapped.nearest.lat}, ${snapped.nearest.lon}) at ${snapped.nearest.distance.toFixed(1)}m (distance=${snapped.dist.toFixed(1)}m)`
+          );
           // Update cp's lat/lon/distance to snapped values
           return {
             ...cp,
@@ -249,7 +253,7 @@ export default function App() {
     }
   };
 
-  // --- Split TCX feature ---
+  // --- Split TCX feature with 500m overlap ---
   function handleSplitTCX() {
     if (!tcx) return;
     const splitPoints = splitMarkers
@@ -261,6 +265,8 @@ export default function App() {
       setError("Please enter valid split markers in KM (comma separated).");
       return;
     }
+
+    const overlap = 500; // meters
 
     // parse the last generated route (as in handleProcess)
     const parser = new DOMParser();
@@ -289,12 +295,14 @@ export default function App() {
     // always add the last distance as final split
     const allSplitPoints = [...splitPoints, trackpoints[trackpoints.length - 1].distance];
     const sections = [];
-    let start = 0;
+    let prevEnd = 0;
     allSplitPoints.forEach((end, i) => {
+      // For splits after the first, start 500m earlier (but not before 0)
+      let start = i === 0 ? 0 : Math.max(0, prevEnd - overlap);
       // get trackpoints for this section (inclusive of first, up to end)
       const sectionTrack = trackpoints.filter(pt => pt.distance >= start && pt.distance <= end);
       if (sectionTrack.length < 2) {
-        start = end;
+        prevEnd = end;
         return; // skip empty sections
       }
       // adjust distances so first is 0
@@ -309,13 +317,13 @@ export default function App() {
         ...cp,
         distance: cp.distance - baseDistance
       }));
-      // build TCX for this section, use baseName for both file and course name
-      const tcxSection = buildTCX(sectionTrack, sectionCourse, `${baseName} Part ${i + 1}`);
+      // build TCX for this section
+      const tcxSection = buildTCX(sectionTrack, sectionCourse, `${baseName} p${i + 1}`);
       sections.push({
-        name: `${baseName}-part-${i + 1}.tcx`,
+        name: `${baseName}-p${i + 1}.tcx`,
         tcx: tcxSection
       });
-      start = end;
+      prevEnd = end;
     });
     setSplitFiles(sections);
     setError(""); // clear any error
@@ -359,6 +367,7 @@ export default function App() {
           </p>
           <p>
             <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
+            Each split will overlap the previous by 500 meters.
           </p>
           <p>
             <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output only if they are within 20 meters of the base GPX track.
