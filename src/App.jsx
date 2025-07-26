@@ -51,6 +51,16 @@ function extractCoursePointsFromTCX(tcxText) {
   }));
 }
 
+// Check if lat/lon is in GPX trackpoints
+function isCoursePointInTrack(lat, lon, trkpts) {
+  // Accept if within ~0.0001 deg (approx 10m)
+  return trkpts.some(
+    pt =>
+      Math.abs(pt.lat - lat) < 1e-4 &&
+      Math.abs(pt.lon - lon) < 1e-4
+  );
+}
+
 export default function App() {
   const [baseGpx, setBaseGpx] = useState(null);
   const [poiGpx, setPoiGpx] = useState(null);
@@ -104,7 +114,7 @@ export default function App() {
 
   const handleProcess = async () => {
     setError("");
-    setSplitFiles([]); // reset split files when re-processing
+    setSplitFiles([]);
     if (!baseGpx) {
       setError("Base GPX is required.");
       return;
@@ -182,13 +192,25 @@ export default function App() {
         };
       });
 
-      // Merge in CoursePoints from file if provided
+      // Merge in CoursePoints from file if provided AND only if their lat/lon matches a trackpoint in base GPX
       let allCues = [...snapped, ...cues];
       if (coursePointsFromFile.length > 0) {
-        // Optionally deduplicate by lat/lon/distance/name/type if you want
+        const validCoursePoints = coursePointsFromFile.filter(cp => {
+          const found = isCoursePointInTrack(cp.lat, cp.lon, updatedTrack);
+          if (!found) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[Ignore CoursePoint] Not in original GPX:`,
+              cp.name,
+              cp.lat,
+              cp.lon
+            );
+          }
+          return found;
+        });
         allCues = [
           ...allCues,
-          ...coursePointsFromFile.filter(cp => cp.lat && cp.lon)
+          ...validCoursePoints
         ];
       }
       allCues.sort((a, b) => a.distance - b.distance);
@@ -323,7 +345,7 @@ export default function App() {
             <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
           </p>
           <p>
-            <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output.
+            <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output only if their location matches a point in the base GPX.
           </p>
         </Card>
         <Card title="1. Upload Base GPX">
@@ -365,7 +387,7 @@ export default function App() {
             onChange={handleCoursePointsTcxUpload}
           />
           <div className="text-xs text-gray-700 mt-1">
-            Only CoursePoints will be imported from this file.<br />
+            Only CoursePoints will be imported from this file if their lat/lon matches a point in the base GPX.<br />
             Useful for preserving turn-by-turn cues from RideWithGPS, etc.
           </div>
         </Card>
