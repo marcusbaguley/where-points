@@ -51,14 +51,22 @@ function extractCoursePointsFromTCX(tcxText) {
   }));
 }
 
-// Check if lat/lon is in GPX trackpoints
-function isCoursePointInTrack(lat, lon, trkpts) {
-  // Accept if within ~0.0001 deg (approx 10m)
-  return trkpts.some(
-    pt =>
-      Math.abs(pt.lat - lat) < 1e-4 &&
-      Math.abs(pt.lon - lon) < 1e-4
-  );
+// --- Snap CoursePoint to nearest trackpoint within maxDistMeters, return merged or null ---
+function snapCoursePointToTrack(lat, lon, trkpts, maxDistMeters = 20) {
+  let minDist = Infinity;
+  let nearest = null;
+  for (const pt of trkpts) {
+    const d = window.haversine(lat, lon, pt.lat, pt.lon);
+    if (d < minDist) {
+      minDist = d;
+      nearest = pt;
+    }
+  }
+  // Only accept if within maxDistMeters
+  if (minDist <= maxDistMeters) {
+    return { nearest, dist: minDist };
+  }
+  return null;
 }
 
 export default function App() {
@@ -192,22 +200,30 @@ export default function App() {
         };
       });
 
-      // Merge in CoursePoints from file if provided AND only if their lat/lon matches a trackpoint in base GPX
+      // Merge in CoursePoints from file if provided, snapping to nearest trackpoint <= 20 meters
       let allCues = [...snapped, ...cues];
       if (coursePointsFromFile.length > 0) {
-        const validCoursePoints = coursePointsFromFile.filter(cp => {
-          const found = isCoursePointInTrack(cp.lat, cp.lon, updatedTrack);
-          if (!found) {
+        const validCoursePoints = coursePointsFromFile.map(cp => {
+          const snapped = snapCoursePointToTrack(cp.lat, cp.lon, updatedTrack, 50);
+          if (!snapped) {
             // eslint-disable-next-line no-console
             console.log(
-              `[Ignore CoursePoint] Not in original GPX:`,
+              `[Ignore CoursePoint] Not within 20m of original GPX:`,
               cp.name,
               cp.lat,
               cp.lon
             );
+            return null;
           }
-          return found;
-        });
+          console.log(`Included: `, cp.name)
+          // Update cp's lat/lon/distance to snapped values
+          return {
+            ...cp,
+            lat: snapped.nearest.lat,
+            lon: snapped.nearest.lon,
+            distance: snapped.nearest.distance
+          };
+        }).filter(Boolean);
         allCues = [
           ...allCues,
           ...validCoursePoints
@@ -345,7 +361,7 @@ export default function App() {
             <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
           </p>
           <p>
-            <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output only if their location matches a point in the base GPX.
+            <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output only if they are within 20 meters of the base GPX track.
           </p>
         </Card>
         <Card title="1. Upload Base GPX">
@@ -387,7 +403,7 @@ export default function App() {
             onChange={handleCoursePointsTcxUpload}
           />
           <div className="text-xs text-gray-700 mt-1">
-            Only CoursePoints will be imported from this file if their lat/lon matches a point in the base GPX.<br />
+            Only CoursePoints will be imported from this file if they are within 20 meters of the base GPX.<br />
             Useful for preserving turn-by-turn cues from RideWithGPS, etc.
           </div>
         </Card>
