@@ -32,6 +32,25 @@ function buildGPXWaypointsFromCSV(csvCues, baseName) {
 </gpx>`;
 }
 
+// --- Helper: Parse TCX CoursePoints ---
+function extractCoursePointsFromTCX(tcxText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(tcxText, "application/xml");
+  if (!doc || !doc.getElementsByTagName) return [];
+  return Array.from(doc.getElementsByTagNameNS("*", "CoursePoint")).map(cp => ({
+    name: cp.getElementsByTagNameNS("*", "Name")[0]?.textContent || "",
+    lat: parseFloat(cp.getElementsByTagNameNS("*", "LatitudeDegrees")[0]?.textContent || "0"),
+    lon: parseFloat(cp.getElementsByTagNameNS("*", "LongitudeDegrees")[0]?.textContent || "0"),
+    ele: undefined,
+    distance: cp.getElementsByTagNameNS("*", "DistanceMeters")[0]
+      ? parseFloat(cp.getElementsByTagNameNS("*", "DistanceMeters")[0].textContent)
+      : undefined,
+    time: cp.getElementsByTagNameNS("*", "Time")[0]?.textContent,
+    type: cp.getElementsByTagNameNS("*", "PointType")[0]?.textContent || "",
+    notes: cp.getElementsByTagNameNS("*", "Notes")[0]?.textContent || "",
+  }));
+}
+
 export default function App() {
   const [baseGpx, setBaseGpx] = useState(null);
   const [poiGpx, setPoiGpx] = useState(null);
@@ -42,15 +61,29 @@ export default function App() {
   const [splitMarkers, setSplitMarkers] = useState(""); // e.g. "100,255,500"
   const [splitFiles, setSplitFiles] = useState([]); // array of {name,tcx}
   const [baseName, setBaseName] = useState(""); // Track Base Name
+  const [coursePointsTcx, setCoursePointsTcx] = useState(null); // file
+  const [coursePointsFromFile, setCoursePointsFromFile] = useState([]); // extracted CoursePoints
 
-  // Update GPX handler to set baseName from filename
+  // Handler for Base GPX, sets baseName
   function handleBaseGpxUpload(e) {
     const file = e.target.files[0];
     setBaseGpx(file);
     if (file) {
-      // Get filename without extension
       const name = file.name.replace(/\.[^/.]+$/, "");
       setBaseName(name);
+    }
+  }
+
+  // Handler for CoursePoints TCX
+  async function handleCoursePointsTcxUpload(e) {
+    const file = e.target.files[0];
+    setCoursePointsTcx(file);
+    if (file) {
+      const text = await file.text();
+      const extracted = extractCoursePointsFromTCX(text);
+      setCoursePointsFromFile(extracted);
+    } else {
+      setCoursePointsFromFile([]);
     }
   }
 
@@ -149,8 +182,16 @@ export default function App() {
         };
       });
 
-      // Sort cues by distance
-      const allCues = [...snapped, ...cues].sort((a, b) => a.distance - b.distance);
+      // Merge in CoursePoints from file if provided
+      let allCues = [...snapped, ...cues];
+      if (coursePointsFromFile.length > 0) {
+        // Optionally deduplicate by lat/lon/distance/name/type if you want
+        allCues = [
+          ...allCues,
+          ...coursePointsFromFile.filter(cp => cp.lat && cp.lon)
+        ];
+      }
+      allCues.sort((a, b) => a.distance - b.distance);
       cues.sort((a, b) => a.distance - b.distance);
 
       const avgSpeed = 4.16; // meters/sec
@@ -163,7 +204,7 @@ export default function App() {
 
       setTcx(buildTCX(updatedTrack, allCues, baseName));
       setCsvCuesWithCoords(cues);
-      setSplitFiles([]); // clear splits on new process
+      setSplitFiles([]);
     } catch (err) {
       setError("Failed to process: " + err.message);
       console.error("[App] Error in processing:", err);
@@ -281,6 +322,9 @@ export default function App() {
           <p>
             <b>Split feature:</b> To split your TCX into sections, enter KM markers and click "Split & Download".
           </p>
+          <p>
+            <b>CoursePoints TCX:</b> Optionally upload a TCX file that contains turn-by-turn CoursePoints only (no route/track). These cues will be merged into the generated TCX output.
+          </p>
         </Card>
         <Card title="1. Upload Base GPX">
           <input
@@ -313,6 +357,17 @@ export default function App() {
             value={csvText}
             onChange={e => setCsvText(e.target.value)}
           />
+        </Card>
+        <Card title="4. Optional: Upload CoursePoints TCX">
+          <input
+            type="file"
+            accept=".tcx"
+            onChange={handleCoursePointsTcxUpload}
+          />
+          <div className="text-xs text-gray-700 mt-1">
+            Only CoursePoints will be imported from this file.<br />
+            Useful for preserving turn-by-turn cues from RideWithGPS, etc.
+          </div>
         </Card>
         {error && (
           <div className="bg-red-100 text-red-700 p-2 mb-2 rounded">{error}</div>
